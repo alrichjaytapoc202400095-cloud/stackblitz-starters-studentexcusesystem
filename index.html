@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alrich Jay Tapoc - Excuse System</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 0 10px; }
+        h1, h2 { margin-bottom: 15px; }
+        input, textarea, select { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
+        button { padding: 10px 20px; cursor: pointer; margin-right: 5px; margin-bottom: 5px; }
+        .btn-primary { background-color: #007bff; color: white; border: none; }
+        .btn-danger { background-color: #dc3545; color: white; border: none; }
+        .btn-edit { background-color: #ffc107; color: black; border: none; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .badge { padding: 3px 8px; border-radius: 4px; color: white; font-size: 0.8em; }
+        .status-Pending { background-color: orange; }
+        .status-Approved { background-color: green; }
+        .status-Rejected { background-color: red; }
+        #notification { position: fixed; bottom: 20px; right: 20px; padding: 10px; background: #333; color: white; display: none; }
+    </style>
+</head>
+<body>
+
+    <h1>Student Excuse System</h1>
+    <p><strong>Developer: Alrich Jay S.Tapoc</strong></p>
+
+    <div>
+        <h2 id="formTitle">Add New Excuse</h2>
+        <form id="excuseForm">
+            <input type="hidden" id="excuseId">
+            
+            <label>Student Name:</label>
+            <input type="text" id="studentName" placeholder="Enter full name" required>
+            
+            <label>Student ID:</label>
+            <input type="text" id="studentId" placeholder="Enter ID" required>
+            
+            <label>Date:</label>
+            <input type="date" id="excuseDate" required>
+            
+            <label>Reason:</label>
+            <textarea id="reason" placeholder="Why were you absent?" required></textarea>
+            
+            <button type="submit" class="btn-primary">Save</button>
+            <button type="button" onclick="resetForm()">Cancel</button>
+        </form>
+    </div>
+
+    <div>
+        <h2>List of Excuses</h2>
+        <button onclick="loadData()">Refresh List</button>
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Date</th>
+                    <th>Reason</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="listBody">
+                <!-- Data goes here -->
+            </tbody>
+        </table>
+    </div>
+
+    <div id="notification"></div>
+
+    <script>
+        // --- CONFIGURATION ---
+        // REPLACE THIS WITH YOUR PARTNER'S RENDER URL
+        const API_URL = "https://stackblitz-starters-studentexcusesystem.onrender.com"; 
+
+        // --- API FUNCTIONS ---
+        async function apiCall(endpoint, method = 'GET', data = null) {
+            try {
+                const options = {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' }
+                };
+                if (data) options.body = JSON.stringify(data);
+
+                const res = await fetch(API_URL + endpoint, options);
+                
+                if (!res.ok) throw new Error("API Error: " + res.status);
+                
+                return await res.json();
+            } catch (error) {
+                showNotification(error.message, true);
+                return null;
+            }
+        }
+
+        // --- MAIN FUNCTIONS ---
+
+        // 1. READ (Get all excuses)
+        async function loadData() {
+            const data = await apiCall('/excuses'); 
+            const list = Array.isArray(data) ? data : (data.data ? data.data : []);
+            
+            const tbody = document.getElementById('listBody');
+            tbody.innerHTML = '';
+
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5">No records found</td></tr>';
+                return;
+            }
+
+            list.forEach(item => {
+                const id = item._id || item.id; 
+                const row = `
+                    <tr>
+                        <td>${item.studentName}<br><small>${item.studentId}</small></td>
+                        <td>${item.date}</td>
+                        <td>${item.reason}</td>
+                        <td><span class="badge status-${item.status}">${item.status}</span></td>
+                        <td>
+                            <button class="btn-edit" onclick="editItem('${id}')">Edit</button>
+                            <button class="btn-danger" onclick="deleteItem('${id}')">Delete</button>
+                            ${item.status === 'Pending' ? `
+                                <button onclick="updateStatus('${id}', 'Approved')">✔</button>
+                                <button onclick="updateStatus('${id}', 'Rejected')">✖</button>
+                            ` : ''}
+                        </td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+        }
+
+        // 2. CREATE or UPDATE
+        async function saveItem(e) {
+            e.preventDefault();
+            
+            const id = document.getElementById('excuseId').value;
+            const payload = {
+                studentName: document.getElementById('studentName').value,
+                studentId: document.getElementById('studentId').value,
+                date: document.getElementById('excuseDate').value,
+                reason: document.getElementById('reason').value
+            };
+
+            if (id) {
+                const currentItem = getCurrentData().find(i => (i._id || i.id) === id);
+                payload.status = currentItem ? currentItem.status : 'Pending';
+                await apiCall(`/excuses/${id}`, 'PUT', payload);
+            } else {
+                payload.status = 'Pending'; 
+                await apiCall('/excuses', 'POST', payload);
+            }
+
+            resetForm();
+            loadData();
+        }
+
+        // 3. DELETE
+        async function deleteItem(id) {
+            if(!confirm("Delete this record?")) return;
+            await apiCall(`/excuses/${id}`, 'DELETE');
+            loadData();
+        }
+
+        // 4. UPDATE STATUS
+        async function updateStatus(id, status) {
+            const currentItem = getCurrentData().find(i => (i._id || i.id) === id);
+            if (!currentItem) return;
+
+            const payload = { ...currentItem, status: status };
+            await apiCall(`/excuses/${id}`, 'PUT', payload);
+            loadData();
+        }
+
+        // --- UI HELPERS ---
+        
+        function editItem(id) {
+            const item = getCurrentData().find(i => (i._id || i.id) === id);
+            if (!item) return;
+
+            document.getElementById('excuseId').value = item._id || item.id;
+            document.getElementById('studentName').value = item.studentName;
+            document.getElementById('studentId').value = item.studentId;
+            document.getElementById('excuseDate').value = item.date;
+            document.getElementById('reason').value = item.reason;
+            
+            document.getElementById('formTitle').innerText = "Edit Excuse";
+            window.scrollTo(0,0);
+        }
+
+        function resetForm() {
+            document.getElementById('excuseForm').reset();
+            document.getElementById('excuseId').value = "";
+            document.getElementById('formTitle').innerText = "Add New Excuse";
+        }
+
+        function getCurrentData() {
+            return window.currentDataList || [];
+        }
+
+        function showNotification(msg, isError = false) {
+            const el = document.getElementById('notification');
+            el.innerText = msg;
+            el.style.backgroundColor = isError ? 'red' : 'green';
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 3000);
+        }
+
+        // --- MOCK FALLBACK (Only runs if API fails for demo) ---
+        // Updated with Alrich Jay Tapoc's name
+        async function loadData() {
+            try {
+                const res = await fetch(API_URL + '/excuses');
+                if(!res.ok) throw new Error("API not reachable");
+                const data = await res.json();
+                window.currentDataList = Array.isArray(data) ? data : (data.data || []);
+                renderList(window.currentDataList);
+            } catch (e) {
+                console.log("Using Mock Data (API Failed or Not Set)");
+                const mock = [
+                    {_id: '1', studentName: 'Alrich Jay Tapoc', studentId: '2023-001', date: '2023-10-01', reason: 'Sick Leave', status: 'Pending'},
+                    {_id: '2', studentName: 'Alrich Jay Tapoc', studentId: '2023-002', date: '2023-10-02', reason: 'School Event', status: 'Approved'}
+                ];
+                window.currentDataList = mock;
+                renderList(mock);
+                showNotification("Using Demo Data (Check API URL)", true);
+            }
+        }
+
+        function renderList(list) {
+            const tbody = document.getElementById('listBody');
+            tbody.innerHTML = '';
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5">No records found</td></tr>';
+                return;
+            }
+            list.forEach(item => {
+                const id = item._id || item.id;
+                const row = `
+                    <tr>
+                        <td>${item.studentName}<br><small>${item.studentId}</small></td>
+                        <td>${item.date}</td>
+                        <td>${item.reason}</td>
+                        <td><span class="badge status-${item.status}">${item.status}</span></td>
+                        <td>
+                            <button class="btn-edit" onclick="editItem('${id}')">Edit</button>
+                            <button class="btn-danger" onclick="deleteItem('${id}')">Delete</button>
+                            ${item.status === 'Pending' ? `
+                                <button onclick="updateStatus('${id}', 'Approved')">✔</button>
+                                <button onclick="updateStatus('${id}', 'Rejected')">✖</button>
+                            ` : ''}
+                        </td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+        }
+
+        document.getElementById('excuseForm').addEventListener('submit', saveItem);
+        loadData();
+    </script>
+</body>
+</html>
